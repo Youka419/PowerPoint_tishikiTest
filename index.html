@@ -2,17 +2,19 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>PowerPoint知識問題集</title>
+  <title>PowerPoint知識問題集 v2</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #f0f4f8; padding: 20px; }
-    .card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 650px; margin: auto; }
+    .card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px_12px rgba(0,0,0,0.08); max-width: 650px; margin: auto; }
     button, select { margin-top: 12px; padding: 12px; font-size: 16px; width: 100%; border-radius: 8px; border: 1px solid #d1d5db; transition: all 0.2s ease-in-out; }
-    button:hover { transform: translateY(-2px); box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    button:disabled { background-color: #d1d5db; cursor: not-allowed; }
     .small { font-size: 14px; color: #4b5563; }
     hr { margin: 24px 0; border-color: #e5e7eb; }
     .dialog-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; animation: fadeIn 0.3s forwards; }
@@ -21,27 +23,22 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes fadeIn { to { opacity: 1; } }
     @keyframes zoomIn { to { transform: scale(1); } }
+    /* Calendar Styles */
+    #calendar { font-size: 14px; }
+    #calendar th, #calendar td { text-align: center; padding: 8px; }
+    #calendar td.today { background-color: #fef3c7; border-radius: 50%; }
+    #calendar td.studied { background-color: #93c5fd; color: white; border-radius: 50%; font-weight: bold; }
   </style>
 </head>
 <body>
   <div class="card" id="app">
-    <h2 class="text-2xl font-bold mb-2 text-center text-gray-800">PowerPoint 上級知識問題集</h2>
-    <p class="small mb-4 text-center">PowerPoint 2019 上級レベルの問題集です。章と問題数を選択して開始してください。</p>
-    
-    <select id="chapterSelect" class="bg-gray-50 border border-gray-300 rounded-md p-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500"></select>
-    <select id="questionCount" class="bg-gray-50 border border-gray-300 rounded-md p-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-      <option value="5">5問</option>
-      <option value="10" selected>10問</option>
-      <option value="all">全問</option>
-    </select>
-    <button onclick="startQuiz()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">この章でクイズを始める</button>
-    <button onclick="showHistoryList()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg">学習履歴を見る</button>
-    <hr>
-    <button onclick="askAITeacher()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg">AI先生に質問する ✨</button>
-    <button onclick="showStudyPlan()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg">今日の学習プランを立てる ✨</button>
+    <!-- Main content will be rendered here -->
   </div>
+
+  <div id="userIdFooter" class="text-center text-xs text-gray-400 mt-4"></div>
   
   <script>
+    // --- DATA ---
     const chapters = {
       "1. 作業環境、環境の設定と変更": [
         { question: "PowerPointのアプリケーションウィンドウの左上に表示される、よく使うコマンドを登録できる領域の名称はどれですか。", options: ["ステータスバー", "ミニツールバー", "クイックアクセスツールバー"], answer: 2, explanation: "ウィンドウの左上に表示されるのは「クイックアクセスツールバー」です。コマンドを自由に追加・削除できます。" },
@@ -155,9 +152,75 @@
       ]
     };
     
+    // --- STATE MANAGEMENT ---
     let currentQuiz = [], currentIndex = 0, wrongAnswers = [], selectedChapter = "";
+    let userId = null;
+    let geminiApiKey = null;
+    let weeklyChart = null;
 
+    // --- INITIALIZATION ---
     window.onload = () => {
+      initializeUser();
+      loadApiKey();
+      renderHomePage();
+    };
+
+    function initializeUser() {
+      userId = localStorage.getItem('quiz_userId');
+      if (!userId) {
+        userId = crypto.randomUUID();
+        localStorage.setItem('quiz_userId', userId);
+      }
+      document.getElementById('userIdFooter').textContent = `学習ID: ${userId}`;
+    }
+
+    function loadApiKey() {
+      geminiApiKey = localStorage.getItem('gemini_apiKey');
+    }
+
+    // --- RENDERING ---
+    function renderHomePage() {
+      const app = document.getElementById("app");
+      app.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-2xl font-bold text-gray-800">PowerPoint 上級知識問題集</h2>
+          <button onclick="showApiKeyDialog()" class="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1 px-3 rounded-full">⚙️ 設定</button>
+        </div>
+        
+        <!-- Dashboard -->
+        <details class="mb-4" open>
+          <summary class="text-lg font-bold text-gray-700 cursor-pointer p-2 rounded-lg hover:bg-gray-100">学習ダッシュボード</summary>
+          <div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div id="calendar-container" class="p-4 bg-gray-50 rounded-lg"></div>
+              <div class="p-4 bg-gray-50 rounded-lg">
+                  <canvas id="weeklyChart"></canvas>
+              </div>
+          </div>
+        </details>
+        <hr>
+        
+        <!-- Quiz Start -->
+        <div>
+            <h3 class="text-lg font-bold text-gray-700 mb-2">クイズに挑戦</h3>
+            <select id="chapterSelect" class="bg-gray-50 border border-gray-300 rounded-md p-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500"></select>
+            <select id="questionCount" class="bg-gray-50 border border-gray-300 rounded-md p-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              <option value="5">5問</option>
+              <option value="10" selected>10問</option>
+              <option value="all">全問</option>
+            </select>
+            <button onclick="startQuiz()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">この章でクイズを始める</button>
+            <button onclick="showHistoryList()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg">学習履歴を見る</button>
+        </div>
+        <hr>
+
+        <!-- AI Features -->
+        <div>
+            <h3 class="text-lg font-bold text-gray-700 mb-2">AI サポート機能</h3>
+            <button onclick="askAITeacher()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg">AI先生に質問する ✨</button>
+            <button onclick="showStudyPlan()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg">今日の学習プランを立てる ✨</button>
+        </div>
+      `;
+      
       const chapterSelect = document.getElementById("chapterSelect");
       chapterSelect.innerHTML = `<option value="">章を選択してください</option>`;
       Object.keys(chapters).forEach(ch => {
@@ -166,8 +229,108 @@
         opt.textContent = ch;
         chapterSelect.appendChild(opt);
       });
-    };
 
+      renderDashboard();
+    }
+    
+    function renderDashboard() {
+        renderCalendar();
+        renderWeeklyChart();
+    }
+
+    function renderCalendar() {
+        const container = document.getElementById('calendar-container');
+        const history = getHistory();
+        const studiedDates = history.map(record => new Date(record.date).toDateString());
+        
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth();
+
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+
+        let html = `<h4 class="font-bold text-center mb-2">${year}年 ${month + 1}月</h4>
+                    <table id="calendar" class="w-full"><thead><tr>`;
+        const days = ['日', '月', '火', '水', '木', '金', '土'];
+        days.forEach(day => html += `<th>${day}</th>`);
+        html += `</tr></thead><tbody><tr>`;
+
+        for (let i = 0; i < firstDay.getDay(); i++) {
+            html += `<td></td>`;
+        }
+
+        for (let day = 1; day <= lastDay.getDate(); day++) {
+            const currentDate = new Date(year, month, day);
+            if (currentDate.getDay() === 0 && day !== 1) {
+                html += `</tr><tr>`;
+            }
+            const dateStr = currentDate.toDateString();
+            let classes = [];
+            if (dateStr === new Date().toDateString()) classes.push('today');
+            if (studiedDates.includes(dateStr)) classes.push('studied');
+            
+            html += `<td class="${classes.join(' ')}">${day}</td>`;
+        }
+        
+        html += `</tr></tbody></table>`;
+        container.innerHTML = html;
+    }
+
+    function renderWeeklyChart() {
+        const ctx = document.getElementById('weeklyChart').getContext('2d');
+        const history = getHistory();
+        const labels = [];
+        const data = [];
+        
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+            
+            const solvedCount = history
+                .filter(record => new Date(record.date).toDateString() === d.toDateString())
+                .reduce((sum, record) => sum + record.total, 0);
+            data.push(solvedCount);
+        }
+        
+        if(weeklyChart) weeklyChart.destroy();
+
+        weeklyChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '解いた問題数',
+                    data: data,
+                    backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: '週間学習グラフ'
+                    }
+                }
+            }
+        });
+    }
+
+    // --- QUIZ LOGIC ---
     function shuffle(array) {
       for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -220,7 +383,7 @@
     function checkAnswer(selected) {
       const q = currentQuiz[currentIndex];
       if (selected !== q.answer) {
-        wrongAnswers.push(q);
+        wrongAnswers.push({ question: q.question, answer: q.options[q.answer], explanation: q.explanation });
       }
       showResult(selected, q);
     }
@@ -255,19 +418,6 @@
       }
     }
 
-    function saveHistory() {
-      const newRecord = {
-        date: new Date().toLocaleString('ja-JP'),
-        chapter: selectedChapter,
-        correct: currentQuiz.length - wrongAnswers.length,
-        total: currentQuiz.length,
-        wrong: wrongAnswers,
-      };
-      const history = JSON.parse(localStorage.getItem("quiz_history") || "[]");
-      history.unshift(newRecord); // Add to the beginning
-      localStorage.setItem("quiz_history", JSON.stringify(history.slice(0, 20))); // Keep last 20 records
-    }
-
     function showFinalScore() {
       const app = document.getElementById("app");
       const correctCount = currentQuiz.length - wrongAnswers.length;
@@ -285,46 +435,47 @@
 
       const reviewBtn = document.createElement("button");
       reviewBtn.textContent = "間違えた問題を復習する";
-      reviewBtn.onclick = showReview;
-      reviewBtn.className = "bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded-lg w-full";
+      reviewBtn.onclick = () => showWrongAnswers(wrongAnswers, showFinalScore);
       reviewBtn.disabled = wrongAnswers.length === 0;
        if (wrongAnswers.length === 0) {
         reviewBtn.textContent = "全問正解です！素晴らしい！";
-        reviewBtn.classList.add("opacity-50", "cursor-not-allowed");
       }
+      reviewBtn.className = "bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded-lg w-full";
       app.appendChild(reviewBtn);
 
       const backBtn = document.createElement("button");
       backBtn.textContent = "ホームに戻る";
-      backBtn.onclick = () => location.reload();
+      backBtn.onclick = renderHomePage;
       backBtn.className = "bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg w-full";
       app.appendChild(backBtn);
     }
     
-    function showReview() {
-      const app = document.getElementById("app");
-      app.innerHTML = `<h2 class="text-xl font-bold mb-4">📘 復習モード：${selectedChapter}</h2><hr>`;
-      
-      wrongAnswers.forEach((q, i) => {
-        const div = document.createElement("div");
-        div.className = "p-4 bg-gray-50 rounded-lg mb-4 border-l-4 border-yellow-500";
-        div.innerHTML = `<p class="font-bold text-gray-800">Q: ${q.question}</p>
-                         <p class="mt-2 text-green-700">✅ 正解: ${q.options[q.answer]}</p>
-                         <p class="mt-1 text-gray-600">📘 解説: ${q.explanation}</p>`;
-        app.appendChild(div);
-      });
+    // --- HISTORY MANAGEMENT ---
+    function getHistory() {
+        return JSON.parse(localStorage.getItem(`quiz_history_${userId}`) || "[]");
+    }
 
-      const backBtn = document.createElement("button");
-      backBtn.textContent = "ホームに戻る";
-      backBtn.onclick = () => location.reload();
-      backBtn.className = "bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg mt-4 w-full";
-      app.appendChild(backBtn);
+    function saveHistory() {
+      const newRecord = {
+        date: new Date().toISOString(),
+        chapter: selectedChapter,
+        correct: currentQuiz.length - wrongAnswers.length,
+        total: currentQuiz.length,
+        wrong: wrongAnswers,
+      };
+      let history = getHistory();
+      history.unshift(newRecord); 
+      localStorage.setItem(`quiz_history_${userId}`, JSON.stringify(history.slice(0, 50))); 
     }
 
     function showHistoryList() {
-      const history = JSON.parse(localStorage.getItem("quiz_history") || "[]");
+      const history = getHistory();
       const app = document.getElementById("app");
-      app.innerHTML = `<h2 class="text-xl font-bold mb-4">📚 学習履歴</h2>`;
+      app.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">📚 学習履歴</h2>
+            <button onclick="resetHistory()" class="text-sm bg-red-100 hover:bg-red-200 text-red-700 font-bold py-1 px-3 rounded-full">履歴をリセット</button>
+        </div>`;
       if (history.length === 0) {
         app.innerHTML += `<p class="text-gray-600 text-center">まだ学習履歴がありません。</p>`;
       } else {
@@ -334,7 +485,7 @@
           div.className = "p-4 bg-gray-50 rounded-lg mb-4";
           div.innerHTML = `
             <p class="font-semibold">${record.chapter}</p>
-            <p class="text-sm text-gray-500">${record.date}</p>
+            <p class="text-sm text-gray-500">${new Date(record.date).toLocaleString('ja-JP')}</p>
             <p class="my-2">正解率: <span class="font-bold ${rate > 80 ? 'text-green-600' : 'text-yellow-600'}">${rate}%</span> (${record.correct}/${record.total}問)</p>
             <div class="h-2 bg-gray-200 rounded-full my-2">
               <div class="h-full bg-blue-500 rounded-full" style="width:${rate}%;"></div>
@@ -342,8 +493,8 @@
           
           if (record.wrong.length > 0) {
             const reviewBtn = document.createElement("button");
-            reviewBtn.textContent = "間違えた問題を復習";
-            reviewBtn.onclick = () => showWrongAnswers(record.wrong);
+            reviewBtn.textContent = `間違えた${record.wrong.length}問を復習`;
+            reviewBtn.onclick = () => showWrongAnswers(record.wrong, showHistoryList);
             reviewBtn.className = "bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg mt-2 w-full text-sm";
             div.appendChild(reviewBtn);
           }
@@ -352,44 +503,52 @@
       }
       const backBtn = document.createElement("button");
       backBtn.textContent = "ホームに戻る";
-      backBtn.onclick = () => location.reload();
+      backBtn.onclick = renderHomePage;
       backBtn.className = "bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg mt-4 w-full";
       app.appendChild(backBtn);
     }
+    
+    function resetHistory() {
+        if (confirm("本当にすべての学習履歴をリセットしますか？この操作は元に戻せません。")) {
+            localStorage.removeItem(`quiz_history_${userId}`);
+            showHistoryList();
+        }
+    }
 
-    function showWrongAnswers(wrongQuestions) {
+    function showWrongAnswers(wrongQuestions, backFunction) {
       const app = document.getElementById("app");
       app.innerHTML = `<h2 class="text-xl font-bold mb-4">🔁 間違えた問題の復習</h2><hr>`;
       wrongQuestions.forEach((q, i) => {
         const div = document.createElement("div");
         div.className = "p-4 bg-gray-50 rounded-lg mb-4 border-l-4 border-yellow-500";
         div.innerHTML = `<p class="font-bold text-gray-800">Q: ${q.question}</p>
-                         <p class="mt-2 text-green-700">✅ 正解: ${q.options[q.answer]}</p>
+                         <p class="mt-2 text-green-700">✅ 正解: ${q.answer}</p>
                          <p class="mt-1 text-gray-600">📘 解説: ${q.explanation}</p>`;
         app.appendChild(div);
       });
 
       const backBtn = document.createElement("button");
-      backBtn.textContent = "学習履歴に戻る";
-      backBtn.onclick = showHistoryList;
+      backBtn.textContent = "戻る";
+      backBtn.onclick = backFunction;
       backBtn.className = "bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg mt-4 w-full";
       app.appendChild(backBtn);
     }
     
-    //---------------------------------------------------------
-    // Gemini API integrations
-    //---------------------------------------------------------
-    const apiKey = ""; 
-
+    // --- API & AI FEATURES ---
     async function callGeminiAPI(prompt, systemInstruction = null) {
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+      if (!geminiApiKey) {
+        throw new Error("API_KEY_NOT_SET");
+      }
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
       const payload = {
         contents: [{ parts: [{ text: prompt }] }],
-        systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : null,
+        ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }),
       };
 
       let response;
-      const maxRetries = 3;
+      const maxRetries = 5;
+      const retryableStatuses = [429, 503, 504];
+
       for (let i = 0; i < maxRetries; i++) {
         try {
           response = await fetch(apiUrl, {
@@ -397,66 +556,52 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-          if (response.status !== 429) break; 
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+
+          if (response.ok) {
+            break;
+          }
+          
+          if (!retryableStatuses.includes(response.status)) {
+             break;
+          }
+          
+          const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+          console.log(`API call failed with status ${response.status}. Retrying in ${delay.toFixed(0)}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          
         } catch (error) {
           console.error("Fetch error:", error);
-          if (i === maxRetries - 1) throw error;
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+          if (i === maxRetries - 1) {
+             throw error;
+          }
+          const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+          console.log(`Network error. Retrying in ${delay.toFixed(0)}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
 
-      if (!response || !response.ok) {
+      if (!response.ok) {
         throw new Error(`API call failed with status: ${response.status}`);
       }
-
       const result = await response.json();
       return result.candidates?.[0]?.content?.parts?.[0]?.text || "応答がありませんでした。";
     }
 
-    function showMessageDialog(title, content) {
-      let dialogContainer = document.querySelector('.dialog-container');
-      if (dialogContainer) dialogContainer.remove();
-      
-      dialogContainer = document.createElement('div');
-      dialogContainer.className = 'dialog-container';
-      
-      const dialog = document.createElement('div');
-      dialog.className = 'dialog';
-      dialog.innerHTML = `<h3 class="text-xl font-bold mb-4">${title}</h3>
-        <p class="text-gray-700 whitespace-pre-wrap">${content}</p>
-        <button onclick="this.parentElement.parentElement.remove()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg mt-6 w-full">閉じる</button>`;
-      
-      dialogContainer.appendChild(dialog);
-      document.body.appendChild(dialogContainer);
-    }
-
-    function showLoadingDialog(title) {
-       let dialogContainer = document.querySelector('.dialog-container');
-      if (dialogContainer) dialogContainer.remove();
-      
-      dialogContainer = document.createElement('div');
-      dialogContainer.className = 'dialog-container';
-      
-      const dialog = document.createElement('div');
-      dialog.className = 'dialog flex flex-col items-center';
-      dialog.innerHTML = `<h3 class="text-xl font-bold mb-4">${title}</h3><div class="spinner"></div>`;
-      
-      dialogContainer.appendChild(dialog);
-      document.body.appendChild(dialogContainer);
-    }
-
     async function askAITeacher() {
+        if (!geminiApiKey) {
+            showApiKeyDialog("AI先生を利用するにはAPIキーの設定が必要です。");
+            return;
+        }
       const app = document.getElementById("app");
       app.innerHTML = `
         <h2 class="text-xl font-bold mb-4">AI先生に質問する ✨</h2>
         <p class="text-gray-600 mb-4">PowerPointに関する質問や、間違えた問題について、AI先生に質問してみましょう。</p>
         <textarea id="aiQuestion" class="w-full h-32 p-2 border border-gray-300 rounded-lg my-4 focus:ring-2 focus:ring-blue-500" placeholder="例：スライドマスターの具体的な活用方法について、もっと詳しく教えてください。"></textarea>
         <button id="sendQuestionBtn" onclick="sendAITeacherQuestion()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg w-full">質問を送信する</button>
-        <button onclick="location.reload()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg mt-2 w-full">ホームに戻る</button>
+        <button onclick="renderHomePage()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg mt-2 w-full">ホームに戻る</button>
       `;
 
-      const history = JSON.parse(localStorage.getItem("quiz_history") || "[]");
+      const history = getHistory();
       if (history.length > 0 && history[0].wrong.length > 0) {
         const latestWrong = history[0].wrong;
         const wrongQuestionText = latestWrong.map(q => `- 「${q.question}」`).join('\n');
@@ -478,14 +623,18 @@
         const response = await callGeminiAPI(question, systemPrompt);
         showMessageDialog("AI先生からの回答", response);
       } catch (e) {
-        showMessageDialog("エラー", "回答の取得中にエラーが発生しました。ネットワーク接続を確認して、もう一度お試しください。");
+        handleApiError(e);
       }
     }
     
     async function showStudyPlan() {
+        if (!geminiApiKey) {
+            showApiKeyDialog("学習プランの作成にはAPIキーの設定が必要です。");
+            return;
+        }
       showLoadingDialog("あなたのための学習プランを作成中です...");
       
-      const history = JSON.parse(localStorage.getItem("quiz_history") || "[]");
+      const history = getHistory();
       const wrongQuestionsText = history.slice(0, 5).flatMap(r => r.wrong.map(q => q.question)).join('\n');
       
       let prompt;
@@ -501,9 +650,90 @@
         const response = await callGeminiAPI(prompt, systemPrompt);
         showMessageDialog("今日の学習プラン提案 ✨", response);
       } catch (e) {
-        showMessageDialog("エラー", "プランの作成中にエラーが発生しました。もう一度お試しください。");
+        handleApiError(e);
       }
     }
+    
+    // --- UTILITIES & DIALOGS ---
+    function showApiKeyDialog(message = "") {
+        const messageHtml = message ? `<p class="text-sm text-red-600 bg-red-100 p-2 rounded-md mb-4">${message}</p>` : "";
+        let dialogContainer = document.querySelector('.dialog-container');
+        if (dialogContainer) dialogContainer.remove();
+        
+        dialogContainer = document.createElement('div');
+        dialogContainer.className = 'dialog-container';
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'dialog';
+        dialog.innerHTML = `
+            <h3 class="text-xl font-bold mb-2">APIキー設定</h3>
+            ${messageHtml}
+            <p class="text-sm text-gray-600 mb-4">AI機能（AI先生、学習プラン）を利用するには、Google AI Studioで取得したGemini APIキーが必要です。</p>
+            <input type="password" id="apiKeyInput" class="w-full p-2 border border-gray-300 rounded-md" placeholder="APIキーを入力...">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-sm text-blue-600 hover:underline">APIキーの取得はこちら</a>
+            <button onclick="saveApiKey()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg mt-4 w-full">保存する</button>
+            <button onclick="this.parentElement.parentElement.remove()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-4 rounded-lg w-full">閉じる</button>`;
+        
+        dialog.querySelector('#apiKeyInput').value = geminiApiKey || '';
+        dialogContainer.appendChild(dialog);
+        document.body.appendChild(dialogContainer);
+    }
+    
+    function saveApiKey() {
+        const key = document.getElementById('apiKeyInput').value;
+        if (key) {
+            localStorage.setItem('gemini_apiKey', key);
+            geminiApiKey = key;
+            document.querySelector('.dialog-container')?.remove();
+            showMessageDialog("成功", "APIキーを保存しました。");
+        } else {
+            localStorage.removeItem('gemini_apiKey');
+            geminiApiKey = null;
+            showMessageDialog("情報", "APIキーを削除しました。");
+        }
+    }
+    
+    function handleApiError(error) {
+        if (error.message === "API_KEY_NOT_SET") {
+            showApiKeyDialog("AI機能を利用するにはAPIキーの設定が必要です。");
+        } else {
+            console.error(error);
+            showMessageDialog("エラー", "AIとの通信中にエラーが発生しました。APIキーが正しいか、ネットワーク接続を確認してください。");
+        }
+    }
+    
+    function showMessageDialog(title, content) {
+      let dialogContainer = document.querySelector('.dialog-container');
+      if (dialogContainer) dialogContainer.remove();
+      
+      dialogContainer = document.createElement('div');
+      dialogContainer.className = 'dialog-container';
+      
+      const dialog = document.createElement('div');
+      dialog.className = 'dialog';
+      dialog.innerHTML = `<h3 class="text-xl font-bold mb-4">${title}</h3>
+        <div class="text-gray-700 whitespace-pre-wrap">${content.replace(/\n/g, '<br>')}</div>
+        <button onclick="this.parentElement.parentElement.remove()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg mt-6 w-full">閉じる</button>`;
+      
+      dialogContainer.appendChild(dialog);
+      document.body.appendChild(dialogContainer);
+    }
+
+    function showLoadingDialog(title) {
+       let dialogContainer = document.querySelector('.dialog-container');
+      if (dialogContainer) dialogContainer.remove();
+      
+      dialogContainer = document.createElement('div');
+      dialogContainer.className = 'dialog-container';
+      
+      const dialog = document.createElement('div');
+      dialog.className = 'dialog flex flex-col items-center';
+      dialog.innerHTML = `<h3 class="text-xl font-bold mb-4">${title}</h3><div class="spinner"></div>`;
+      
+      dialogContainer.appendChild(dialog);
+      document.body.appendChild(dialogContainer);
+    }
+
   </script>
 </body>
 </html>
